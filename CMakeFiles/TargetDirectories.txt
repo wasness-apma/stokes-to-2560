@@ -1,0 +1,6 @@
+/Users/asness_will/Desktop/Everything_Academic/research/numerical_pdes/stokes-to-2560/CMakeFiles/stokes.dir
+/Users/asness_will/Desktop/Everything_Academic/research/numerical_pdes/stokes-to-2560/CMakeFiles/stokes_with_density.dir
+/Users/asness_will/Desktop/Everything_Academic/research/numerical_pdes/stokes-to-2560/CMakeFiles/stokes_to.dir
+/Users/asness_will/Desktop/Everything_Academic/research/numerical_pdes/stokes-to-2560/CMakeFiles/dataclean.dir
+/Users/asness_will/Desktop/Everything_Academic/research/numerical_pdes/stokes-to-2560/CMakeFiles/edit_cache.dir
+/Users/asness_will/Desktop/Everything_Academic/research/numerical_pdes/stokes-to-2560/CMakeFiles/rebuild_cache.dir
