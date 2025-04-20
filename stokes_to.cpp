@@ -476,8 +476,8 @@ int main(int argc, char *argv[])
     // 11. Iterate:
     for (int k = 1; k <= max_it; k++)
     {
-        // if (1 < k) { alpha *= ((real_t) k) / ((real_t) k - 1); } // divergent sequence
-        if (k >= 100 && alpha > 0.001) { alpha *= ((real_t) k - 1) / ((real_t) k); } // divergent sequence
+        if (1 < k && k <= 50) { alpha *= ((real_t) k) / ((real_t) k - 1); } // divergent sequence
+        if (k > 50 && alpha > 0.1) { alpha *= ((real_t) k - 1) / ((real_t) k); } // divergent sequence
 
         mfem::out << "\nStep = " << k << std::endl;
 
@@ -502,7 +502,7 @@ int main(int argc, char *argv[])
         stokesOperator.SetBlock(0,0, &massDiffusionOperator.SpMat());
         SparseMatrix * stokesMatrix = stokesOperator.CreateMonolithic();    
 
-        mfem::out << "Sovling physics." << std::endl;
+        mfem::out << "Solving physics." << std::endl;
         UMFPackSolver umf_solver;
         umf_solver.Control[UMFPACK_ORDERING] = UMFPACK_ORDERING_METIS;
         umf_solver.SetOperator(*stokesMatrix);
