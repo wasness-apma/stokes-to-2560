@@ -105,9 +105,8 @@ real_t proj(GridFunction &psi, real_t target_volume, real_t domain_volume, real_
    real_t x;
    real_t x_vol;
 
-   for (int k=0; k<max_its; k++) // Newton iteration
+   for (int k=0; k<max_its; k++) // Illinois iteration
    {
-        // std::cout << "\n iter: " << k << "\n";
         x = b - b_vol_minus * (b - a) / (b_vol_minus - a_vol_minus);
 
         LinearForm int_sigmoid_psi_x(psi.FESpace());
@@ -130,7 +129,6 @@ real_t proj(GridFunction &psi, real_t target_volume, real_t domain_volume, real_
         b_vol_minus = x_vol_minus;
 
         if (abs(x_vol_minus) < tol) {
-            // std::cout << "done, breaking, x_vol_minus, tol: " << x_vol_minus << " _ " << tol;
             done = true;
             break;
         }
@@ -142,81 +140,9 @@ real_t proj(GridFunction &psi, real_t target_volume, real_t domain_volume, real_
         mfem_warning("Projection reached maximum iteration without converging. "
                     "Result may not be accurate.");
     }
-//    int_sigmoid_psi.Assemble();
    return x_vol;
 }
 
-/*
- * ---------------------------------------------------------------
- *                      ALGORITHM PREAMBLE - THIS IS INACCURATE FOR NOW, WE USE DIFFERENT PHYSICS
- * ---------------------------------------------------------------
- *
- *  The Lagrangian for this problem is
- *
- *          L(u,ρ,ρ̃,w,w̃) = (f,u) - (r(ρ̃) C ε(u),ε(w)) + (f,w)
- *                       - (ϵ² ∇ρ̃,∇w̃) - (ρ̃,w̃) + (ρ,w̃)
- *
- *  where
- *
- *    r(ρ̃) = ρ₀ + ρ̃³ (1 - ρ₀)       (SIMP rule)
- *
- *    ε(u) = (∇u + ∇uᵀ)/2           (symmetric gradient)
- *
- *    C e = λtr(e)I + 2μe           (isotropic material)
- *
- *  NOTE: The Lame parameters can be computed from Young's modulus E
- *        and Poisson's ratio ν as follows:
- *
- *             λ = E ν/((1+ν)(1-2ν)),      μ = E/(2(1+ν))
- *
- * ---------------------------------------------------------------
- *
- *  Discretization choices:
- *
- *     u ∈ V ⊂ (H¹)ᵈ (order p)
- *     ψ ∈ L² (order p - 1), ρ = sigmoid(ψ)
- *     ρ̃ ∈ H¹ (order p)
- *     w ∈ V  (order p)
- *     w̃ ∈ H¹ (order p)
- *
- * ---------------------------------------------------------------
- *                          ALGORITHM
- * ---------------------------------------------------------------
- *
- *  Update ρ with projected mirror descent via the following algorithm.
- *
- *  1. Initialize ψ = inv_sigmoid(vol_fraction) so that ∫ sigmoid(ψ) = θ vol(Ω)
- *
- *  While not converged:
- *
- *     2. Solve filter equation ∂_w̃ L = 0; i.e.,
- *
- *           (ϵ² ∇ ρ̃, ∇ v ) + (ρ̃,v) = (ρ,v)   ∀ v ∈ H¹.
- *
- *     3. Solve primal problem ∂_w L = 0; i.e.,
- *
- *      (λ r(ρ̃) ∇⋅u, ∇⋅v) + (2 μ r(ρ̃) ε(u), ε(v)) = (f,v)   ∀ v ∈ V.
- *
- *     NB. The dual problem ∂_u L = 0 is the negative of the primal problem due to symmetry.
- *
- *     4. Solve for filtered gradient ∂_ρ̃ L = 0; i.e.,
- *
- *      (ϵ² ∇ w̃ , ∇ v ) + (w̃ ,v) = (-r'(ρ̃) ( λ |∇⋅u|² + 2 μ |ε(u)|²),v)   ∀ v ∈ H¹.
- *
- *     5. Project the gradient onto the discrete latent space; i.e., solve
- *
- *                         (G,v) = (w̃,v)   ∀ v ∈ L².
- *
- *     6. Bregman proximal gradient update; i.e.,
- *
- *                            ψ ← ψ - αG + c,
- *
- *     where α > 0 is a step size parameter and c ∈ R is a constant ensuring
- *
- *                     ∫_Ω sigmoid(ψ - αG + c) dx = θ vol(Ω).
- *
- *  end
- */
 
 void u_bdry(const Vector &x, Vector & u);
 void f(const Vector &x, Vector &f);
@@ -226,17 +152,20 @@ SparseMatrix ToRowMatrix(LinearForm &lf);
 
 real_t identity(const real_t x);
 
+const real_t alpha_under = 2.5 / (pow(100.0, 2));
+const real_t alpha_over = 2.5 / (pow(0.01, 2));
+const real_t q = 0.01;
 
 int main(int argc, char *argv[])
 {
    // 1. Parse command-line options.
     int ref_levels = 5;
     int order = 1;
-    real_t alpha = 1.0;
+    real_t alpha = 5.0;
     real_t vol_fraction = 1./3.;
-    int max_it = 1e4;
-    real_t itol = 1e-1;
-    real_t ntol = 1e-4;
+    int max_it = 1e3;
+    real_t itol = 1.5 * 1e-1;
+    real_t ntol = 1.5 * 1e-4;
     real_t rho_min = 1e-6;
     real_t mu = 1.0;
     real_t delta = 1.5;
@@ -349,7 +278,6 @@ int main(int argc, char *argv[])
     GridFunction psi(&control_fes);
     GridFunction psi_old(&control_fes);
     u = 0.0;
-    // dudrho = 0.0;
     p = 0.0;
     psi = inv_sigmoid(vol_fraction);
     psi_old = inv_sigmoid(vol_fraction);
@@ -445,10 +373,12 @@ int main(int argc, char *argv[])
 
     string paraview_name;
     if (use_punctured_domain) {
-        paraview_name = "five_hole_example";
+        std::ostringstream oss;
+        oss << "five_hole_example_q_" << q;
+        paraview_name = oss.str();
     } else {
         std::ostringstream oss;
-        oss << "rectanguler_example_delta_" << delta;
+        oss << "rectanguler_example_delta_" << delta << "_q_" << q;
         paraview_name = oss.str();
     }
     mfem::ParaViewDataCollection paraview_dc(paraview_name, &mesh);
@@ -466,18 +396,11 @@ int main(int argc, char *argv[])
         paraview_dc.Save();
     }
 
-    //  GLVis glvis("localhost", 19916, false);
-
-    // glvis.Append(grad, "grad");
-    // glvis.Append(psi, "psi");
-    // glvis.Append(rho_gf, "rho");
-    // glvis.Append(u, "u");
-
     // 11. Iterate:
     for (int k = 1; k <= max_it; k++)
     {
         if (1 < k && k <= 50) { alpha *= ((real_t) k) / ((real_t) k - 1); } // divergent sequence
-        if (k > 50 && alpha > 0.1) { alpha *= ((real_t) k - 1) / ((real_t) k); } // divergent sequence
+        if (k > 50 && alpha > 1./3000.) { alpha *= ((real_t) k - 1) / ((real_t) k); } // divergent sequence
 
         mfem::out << "\nStep = " << k << std::endl;
 
@@ -536,31 +459,19 @@ int main(int argc, char *argv[])
         // Compute ||ρ - ρ_old|| in control fes.
         real_t norm_increment = zerogf.ComputeL1Error(succ_diff_rho);
         real_t norm_reduced_gradient = norm_increment/alpha;
-        // Compute ||grad(J) - grad(J_old)|| in control fes
-        // rho_diff.ProjectCoefficient(succ_diff_rho);
         real_t grad_norm_increment = zerogf.ComputeL1Error(succ_diff_gradient);
-        real_t rho_norm_increment = zerogf.ComputeL1Error(succ_diff_rho);
-        real_t estimated_lipschitz_constant = grad_norm_increment / rho_norm_increment;
-        // grad_old.ProjectCoefficient(grad_coeff);
+        real_t estimated_lipschitz_constant = grad_norm_increment / norm_increment;
 
         psi_old = psi;
         grad_old = grad;
 
-        if (norm_reduced_gradient != norm_reduced_gradient) {
-            throw std::abort;
-        }
-
-        // real_t compliance = (*(ElasticitySolver->GetLinearForm()))(u);
         mfem::out << "norm of the reduced gradient = " << norm_reduced_gradient <<
                 std::endl;
         mfem::out << "norm of the increment = " << norm_increment << endl;
-        // mfem::out << "compliance = " << compliance << std::endl;
         mfem::out << "estimated Lipschitz constant = " << estimated_lipschitz_constant <<
                 std::endl;
         mfem::out << "volume fraction = " << material_volume / domain_volume <<
                 std::endl;
-
-        // throw std::abort;
 
         if (glvis_visualization)
         {
@@ -581,24 +492,14 @@ int main(int argc, char *argv[])
             paraview_dc.Save();
         }
 
-        if (norm_reduced_gradient < ntol && norm_increment < itol)
+        if (norm_reduced_gradient/domain_volume < ntol && norm_increment/domain_volume < itol)
         {
             break;
         }
-
-        // if (k >= 50) {
-        //     alpha = std::min(0.1, 1/estimated_lipschitz_constant);
-        // }
     }
 
     return 0;
 }
-
-
-// constants from the dolphin_adjoint paper
-const real_t alpha_under = 2.5 / (pow(100.0, 2));
-const real_t alpha_over = 2.5 / (pow(0.01, 2));
-const real_t q = 0.1;
 
 // for numerical stability, keep psi constrained
 real_t psi_maxmin = 5.0;
