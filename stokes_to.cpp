@@ -154,22 +154,24 @@ real_t identity(const real_t x);
 
 const real_t alpha_under = 2.5 / (pow(100.0, 2));
 const real_t alpha_over = 2.5 / (pow(0.01, 2));
-const real_t q = 0.01;
+const real_t q = 1.0;
 
 int main(int argc, char *argv[])
 {
    // 1. Parse command-line options.
     int ref_levels = 5;
     int order = 1;
-    real_t alpha = 5.0;
-    real_t vol_fraction = 1./3.;
+    real_t alpha = 1e-4;
+    real_t vol_fraction = 0.4;
     int max_it = 1e3;
-    real_t itol = 1.5 * 1e-1;
+    real_t itol = 1.5 * 1e-1; 
     real_t ntol = 1.5 * 1e-4;
     real_t rho_min = 1e-6;
     real_t mu = 1.0;
     real_t delta = 1.5;
 
+
+    bool use_quadrilaterals = false;
     bool use_punctured_domain = false;
     bool glvis_visualization = true;
     bool paraview_output = true;
@@ -204,6 +206,9 @@ int main(int argc, char *argv[])
                     "Use punctured five-hole domain.");
     args.AddOption(&delta, "-d", "--delta",
                     "Relative width of domain.");
+    args.AddOption(&use_quadrilaterals, "-uq", "--quadrilaterals", "-no-uq",
+                    "--no-quadrilaterals",
+                    "Use quadrilaterals for the meshing.");
     args.Parse();
     if (!args.Good())
     {
@@ -212,10 +217,20 @@ int main(int argc, char *argv[])
     }
     args.PrintOptions(mfem::out);
 
+    // if (use_quadrilaterals) {
+    //     itol = itol / 5;
+    //     ntol = ntol / 5;
+    // }
+
     Mesh mesh;
     if (!use_punctured_domain) {
-        mesh = Mesh::MakeCartesian2D(1.0, 1.0, mfem::Element::Type::TRIANGLE,
-                                        true, 1.0 * delta, 1.0);
+        if (!use_quadrilaterals) {
+            mesh = Mesh::MakeCartesian2D(1.0, 1.0, mfem::Element::Type::TRIANGLE,
+                                            true, 1.0 * delta, 1.0);
+        } else {
+            mesh = Mesh::MakeCartesian2D(1.0, 1.0, mfem::Element::Type::QUADRILATERAL,
+                                            true, 1.0 * delta, 1.0);
+        }
     } else {
         string mesh_file = "rectangle_with_holes_mesh.msh";
         mesh = Mesh(mesh_file, 1, 1);   
@@ -236,8 +251,11 @@ int main(int argc, char *argv[])
     // 4. Define the necessary finite element spaces on the mesh.
     H1_FECollection velocity_fec(order + 1, dim); // space for u
     H1_FECollection pressure_fec(order, dim); // space for p
-    L2_FECollection control_fec(0, dim,
-                                BasisType::GaussLobatto); // space for ψ
+    // L2_FECollection control_fec(0, dim,
+    //                             BasisType::GaussLobatto); // space for ψ
+    H1_FECollection control_fec(1, dim,
+                            BasisType::GaussLobatto); // space for ψ
+    
 
     FiniteElementSpace velocity_fes(&mesh, &velocity_fec, dim=dim);
     FiniteElementSpace pressure_fes(&mesh, &pressure_fec);
@@ -350,12 +368,21 @@ int main(int argc, char *argv[])
     real_t domain_volume = vol_form(onegf);
     const real_t target_volume = domain_volume * vol_fraction;
 
+    // mass matrix to invert for adjoint problem
     BilinearForm mass(&control_fes);
-    mass.AddDomainIntegrator(new InverseIntegrator(new MassIntegrator(one)));
+    // mass.AddDomainIntegrator(new InverseIntegrator(new MassIntegrator(one)));
+    mass.AddDomainIntegrator(new MassIntegrator(one));
     mass.Assemble();
     SparseMatrix M;
     Array<int> empty;
     mass.FormSystemMatrix(empty,M);
+    CGSolver cg;
+    cg.SetRelTol(1e-10);
+    cg.SetAbsTol(1e-10);
+    cg.SetMaxIter(10000);
+    cg.SetOperator(M);
+    GSSmoother prec(M);
+    cg.SetPreconditioner(prec);
 
     // 10. Connect to GLVis. Prepare for VisIt output.
     char vishost[] = "localhost";
@@ -374,11 +401,14 @@ int main(int argc, char *argv[])
     string paraview_name;
     if (use_punctured_domain) {
         std::ostringstream oss;
-        oss << "five_hole_example_q_" << q;
+        oss << "five_hole_example_q_" << q << "_o_" << order << "_controlorder_" << 1;
         paraview_name = oss.str();
     } else {
         std::ostringstream oss;
-        oss << "rectanguler_example_delta_" << delta << "_q_" << q;
+        oss << "rectangular_example_delta_" << delta << "_q_" << q << "_o_" << order << "_controlorder_" << 1;
+        if (use_quadrilaterals) {
+            oss << "_quad";
+        }
         paraview_name = oss.str();
     }
     mfem::ParaViewDataCollection paraview_dc(paraview_name, &mesh);
@@ -399,8 +429,8 @@ int main(int argc, char *argv[])
     // 11. Iterate:
     for (int k = 1; k <= max_it; k++)
     {
-        if (1 < k && k <= 50) { alpha *= ((real_t) k) / ((real_t) k - 1); } // divergent sequence
-        if (k > 50 && alpha > 1./3000.) { alpha *= ((real_t) k - 1) / ((real_t) k); } // divergent sequence
+        if (1 < k && k < 25) { alpha *= ((real_t) k) / ((real_t) k - 1); } // divergent sequence
+        // if (k > 50 && alpha > 1./3000.) { alpha *= ((real_t) k - 1) / ((real_t) k); } // divergent sequence
 
         mfem::out << "\nStep = " << k << std::endl;
 
@@ -445,7 +475,8 @@ int main(int argc, char *argv[])
         ProductCoefficient half_times_alpha_times_usquared_coeff(half, alpha_times_usquared_coeff);
         w_rhs.AddDomainIntegrator(new DomainLFIntegrator(half_times_alpha_times_usquared_coeff));
         w_rhs.Assemble();
-        M.Mult(w_rhs,grad);
+        // M.Mult(w_rhs,grad);
+        cg.Mult(w_rhs, grad);
 
         // mfem::out << "Projecting and updating glvis." << std::endl;
         // rho_gf.ProjectCoefficient(rho);
