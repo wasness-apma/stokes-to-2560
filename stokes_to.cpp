@@ -154,15 +154,15 @@ real_t identity(const real_t x);
 
 const real_t alpha_under = 2.5 / (pow(100.0, 2));
 const real_t alpha_over = 2.5 / (pow(0.01, 2));
-const real_t q = 1.0;
+const real_t q = 0.1;
 
 int main(int argc, char *argv[])
 {
    // 1. Parse command-line options.
     int ref_levels = 5;
     int order = 1;
-    real_t alpha = 1e-4;
-    real_t vol_fraction = 0.4;
+    real_t alpha = 1e-1;
+    real_t vol_fraction = 0.3;
     int max_it = 1e3;
     real_t itol = 1.5 * 1e-1; 
     real_t ntol = 1.5 * 1e-4;
@@ -250,11 +250,12 @@ int main(int argc, char *argv[])
 
     // 4. Define the necessary finite element spaces on the mesh.
     H1_FECollection velocity_fec(order + 1, dim); // space for u
-    H1_FECollection pressure_fec(order, dim); // space for p
-    // L2_FECollection control_fec(0, dim,
-    //                             BasisType::GaussLobatto); // space for ψ
-    H1_FECollection control_fec(1, dim,
-                            BasisType::GaussLobatto); // space for ψ
+    // H1_FECollection pressure_fec(order, dim); // space for p
+    H1_FECollection pressure_fec(order, dim);
+    L2_FECollection control_fec(0, dim,
+                                BasisType::GaussLobatto); // space for ψ
+    // H1_FECollection control_fec(1, dim,
+                            // BasisType::GaussLobatto); // space for ψ
     
 
     FiniteElementSpace velocity_fes(&mesh, &velocity_fec, dim=dim);
@@ -370,19 +371,20 @@ int main(int argc, char *argv[])
 
     // mass matrix to invert for adjoint problem
     BilinearForm mass(&control_fes);
-    // mass.AddDomainIntegrator(new InverseIntegrator(new MassIntegrator(one)));
-    mass.AddDomainIntegrator(new MassIntegrator(one));
+    mass.AddDomainIntegrator(new InverseIntegrator(new MassIntegrator(one)));
+    // mass.AddDomainIntegrator(new MassIntegrator(one));
     mass.Assemble();
-    SparseMatrix M;
-    Array<int> empty;
-    mass.FormSystemMatrix(empty,M);
-    CGSolver cg;
-    cg.SetRelTol(1e-10);
-    cg.SetAbsTol(1e-10);
-    cg.SetMaxIter(10000);
-    cg.SetOperator(M);
-    GSSmoother prec(M);
-    cg.SetPreconditioner(prec);
+    mass.Finalize();
+    // SparseMatrix M;
+    // Array<int> empty;
+    // mass.FormSystemMatrix(empty,M);
+    // CGSolver cg;
+    // cg.SetRelTol(1e-10);
+    // cg.SetAbsTol(1e-10);
+    // cg.SetMaxIter(10000);
+    // cg.SetOperator(M);
+    // GSSmoother prec(M);
+    // cg.SetPreconditioner(prec);
 
     // 10. Connect to GLVis. Prepare for VisIt output.
     char vishost[] = "localhost";
@@ -475,8 +477,8 @@ int main(int argc, char *argv[])
         ProductCoefficient half_times_alpha_times_usquared_coeff(half, alpha_times_usquared_coeff);
         w_rhs.AddDomainIntegrator(new DomainLFIntegrator(half_times_alpha_times_usquared_coeff));
         w_rhs.Assemble();
-        // M.Mult(w_rhs,grad);
-        cg.Mult(w_rhs, grad);
+        mass.Mult(w_rhs,grad);
+        // cg.Mult(w_rhs, grad);
 
         // mfem::out << "Projecting and updating glvis." << std::endl;
         // rho_gf.ProjectCoefficient(rho);
@@ -532,8 +534,8 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-// for numerical stability, keep psi constrained
-real_t psi_maxmin = 5.0;
+// // for numerical stability, keep psi constrained
+// real_t psi_maxmin = 5.0;
 
 void u_bdry(const Vector &x, Vector & u) {
     float y = x(1);
